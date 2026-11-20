@@ -1,0 +1,21 @@
+[project]
+name = "lunar-lander"
+version = "0.1.0"
+description = "Deep Q-Learning agent for Gymnasium Lunar Lander"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "gymnasium[box2d]>=0.29",
+    "numpy>=1.24",
+    "torch>=2.0",
+]
+
+# Use the small CPU-only PyTorch builds on every platform. For GPU builds,
+# replace this with the appropriate index (see docs.astral.sh/uv/guides/integration/pytorch/).
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
