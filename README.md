@@ -59,6 +59,20 @@ the game. On a machine without a display, run it under a virtual framebuffer,
 for example `xvfb-run -a uv run main.py watch`, or use
 `--render-mode rgb_array`.
 
+## Record a GIF
+
+To capture a successful landing from the trained agent:
+
+```bash
+uv run main.py record --output assets/landing.gif
+```
+
+This runs greedy episodes until one scores at least 200 (the solved threshold)
+and saves it as an animated GIF. Useful options: `--min-score`, `--max-episodes`,
+`--frame-skip`, `--width`, `--fps`, and `--seed`; run
+`uv run main.py record --help` for details. The committed
+`assets/landing.gif` was produced this way from the final trained model.
+
 ## Algorithm
 
 Lunar Lander exposes 8 observation values and 4 discrete actions. The agent
@@ -82,7 +96,8 @@ uses the classic DQN recipe:
 - `dqn.py` — Q-network, replay buffer, DQN agent, checkpoint save/load.
 - `pyproject.toml` — project metadata and dependencies (managed by uv).
 - `uv.lock` — locked dependency versions for reproducible installs.
-- `models/` — created on training; holds the saved `.pt` checkpoint.
+- `assets/landing.gif` — recording of a successful landing by the trained agent.
+- `models/` — created on training; holds the saved `.pt` checkpoint (gitignored).
 
 ## Useful references
 

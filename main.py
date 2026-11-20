@@ -8,6 +8,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import os
 import random
 from collections import deque
 from pathlib import Path
@@ -20,6 +21,7 @@ from dqn import DQN, DQNConfig
 
 DEFAULT_ENV_ID = "LunarLander-v3"
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parent / "models" / "dqn_lunar_lander.pt"
+DEFAULT_GIF_PATH = Path(__file__).resolve().parent / "assets" / "landing.gif"
 
 
 def make_env(env_id: str, render_mode: str | None = None) -> gym.Env:
@@ -225,6 +227,108 @@ def watch(args: argparse.Namespace) -> None:
         env.close()
 
 
+def save_gif(frames: list, path: Path, duration: int, image_module) -> None:
+    """Write rendered frames as an animated, palette-reduced GIF."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    palette_frames = [
+        frame.quantize(colors=128, method=image_module.Quantize.FASTOCTREE)
+        for frame in frames
+    ]
+    palette_frames[0].save(
+        path,
+        save_all=True,
+        append_images=palette_frames[1:],
+        duration=duration,
+        loop=0,
+        optimize=True,
+        disposal=2,
+    )
+
+
+def record(args: argparse.Namespace) -> None:
+    """Record a GIF of the first greedy episode that reaches --min-score."""
+    from PIL import Image  # only needed for recording
+
+    if args.frame_skip < 1:
+        raise ValueError("--frame-skip must be at least 1")
+    if args.fps < 1 or args.width < 1:
+        raise ValueError("--fps and --width must be positive")
+
+    # Rendering to an array does not need a display, but pygame still initializes
+    # a video backend, so use a dummy one on headless machines.
+    os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+
+    agent, checkpoint = DQN.load(args.model)
+    env_id = args.env_id or checkpoint.get("env_id") or DEFAULT_ENV_ID
+    agent.policy_net.eval()
+
+    env = make_env(env_id, render_mode="rgb_array")
+    try:
+        check_env_compat(agent, env)
+    except ValueError:
+        env.close()
+        raise
+
+    def capture(frame) -> object:
+        image = Image.fromarray(frame)
+        if image.width != args.width:
+            height = max(1, round(image.height * args.width / image.width))
+            image = image.resize((args.width, height), Image.Resampling.LANCZOS)
+        return image
+
+    duration = max(1, round(1000 / args.fps))
+    best_score = float("-inf")
+    best_frames: list = []
+
+    print(
+        f"Recording {env_id} with the model from {args.model}; "
+        f"stopping at the first episode scoring >= {args.min_score:.0f}."
+    )
+    try:
+        for episode in range(1, args.max_episodes + 1):
+            seed = args.seed + episode - 1 if args.seed is not None else None
+            state, _ = env.reset(seed=seed)
+            frames: list = []
+            episode_reward = 0.0
+            step = 0
+
+            while True:
+                if step % args.frame_skip == 0:
+                    frame = env.render()
+                    if frame is not None:
+                        frames.append(capture(frame))
+                action = agent.select_action(state, epsilon=0.0)
+                state, reward, terminated, truncated, _ = env.step(action)
+                episode_reward += reward
+                step += 1
+                if terminated or truncated:
+                    break
+
+            frame = env.render()
+            if frame is not None:
+                frames.append(capture(frame))
+
+            print(f"episode {episode}: score {episode_reward:.1f} ({len(frames)} frames)")
+            if not frames:
+                continue
+
+            if episode_reward >= args.min_score:
+                save_gif(frames, args.output, duration, Image)
+                print(f"Saved successful landing GIF to {args.output}")
+                return
+            if episode_reward > best_score:
+                best_score, best_frames = episode_reward, frames
+    finally:
+        env.close()
+
+    if best_frames:
+        save_gif(best_frames, args.output, duration, Image)
+        print(
+            f"No episode reached {args.min_score:.0f}; "
+            f"saved the best one ({best_score:.1f}) to {args.output}"
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Deep Q-Learning agent for Gymnasium Lunar Lander."
@@ -287,6 +391,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Gymnasium render mode (use rgb_array on headless machines)",
     )
 
+    record_parser = subparsers.add_parser(
+        "record", help="record a GIF of a successful greedy episode"
+    )
+    record_parser.add_argument(
+        "--model", type=Path, default=DEFAULT_MODEL_PATH, help="saved model to load"
+    )
+    record_parser.add_argument(
+        "--output", type=Path, default=DEFAULT_GIF_PATH, help="where to write the GIF"
+    )
+    record_parser.add_argument("--env-id", default=None, help="defaults to the saved env")
+    record_parser.add_argument(
+        "--min-score",
+        type=float,
+        default=200.0,
+        help="only save an episode scoring at least this much",
+    )
+    record_parser.add_argument(
+        "--max-episodes", type=int, default=20, help="maximum attempts to find one"
+    )
+    record_parser.add_argument(
+        "--frame-skip", type=int, default=2, help="keep every Nth rendered frame"
+    )
+    record_parser.add_argument("--width", type=int, default=480, help="GIF frame width")
+    record_parser.add_argument("--fps", type=int, default=20, help="GIF playback speed")
+    record_parser.add_argument("--seed", type=int, default=None)
+
     return parser
 
 
@@ -294,8 +424,10 @@ def main() -> None:
     args = build_parser().parse_args()
     if args.command == "train":
         train(args)
-    else:
+    elif args.command == "watch":
         watch(args)
+    else:
+        record(args)
 
 
 if __name__ == "__main__":
